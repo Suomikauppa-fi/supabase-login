@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>Netvisor sync – authorise access</title>
+  <title>Netvisor sync – sign in</title>
   <style>
     :root {
       --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5b6475;
-      --border: #dde1e8; --accent: #1f5fd6; --accent-text: #ffffff; --danger: #b42318;
+      --border: #dde1e8; --accent: #1f5fd6; --accent-text: #ffffff; --danger: #b42318; --success: #1a7f45;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --bg: #12151b; --card: #1b2029; --text: #e7eaf0; --muted: #9aa3b5;
-        --border: #2c3340; --accent: #6b9cff; --accent-text: #0d1117; --danger: #ff8a7a;
+        --border: #2c3340; --accent: #6b9cff; --accent-text: #0d1117; --danger: #ff8a7a; --success: #5fd08f;
       }
     }
     * { box-sizing: border-box; }
@@ -44,7 +44,10 @@
     dd { margin: 0; word-break: break-word; }
     ul { margin: 0 0 8px; padding-left: 20px; color: var(--muted); font-size: 14px; }
     .error { color: var(--danger); margin-top: 12px; }
+    .success { color: var(--success); margin-top: 12px; }
+    .hint { font-size: 13px; margin: 8px 0 0; }
     .link { background: none; border: 0; color: var(--accent); padding: 0; width: auto; margin-top: 16px; font-weight: 400; }
+    .links { display: flex; flex-wrap: wrap; gap: 0 20px; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -54,7 +57,7 @@
 
   <section id="login" hidden>
     <h1>Sign in</h1>
-    <p>Sign in to connect Claude to the Netvisor sync.</p>
+    <p id="login-text">Sign in to connect Claude to the Netvisor sync.</p>
     <form id="login-form">
       <label for="email">Email</label>
       <input id="email" type="email" autocomplete="username" required>
@@ -77,7 +80,32 @@
     </ul>
     <button id="approve">Allow</button>
     <button id="deny" class="secondary">Deny</button>
-    <button id="switch" class="link">Use a different account</button>
+    <div class="links">
+      <button id="consent-change-password" class="link">Change password</button>
+      <button id="switch" class="link">Use a different account</button>
+    </div>
+  </section>
+
+  <section id="account" hidden>
+    <h1>Your account</h1>
+    <p>Signed in as <strong id="account-email"></strong>.</p>
+    <p>To connect Claude, start from Claude's connector settings. This page then opens by itself.</p>
+    <button id="account-change-password">Change password</button>
+    <button id="account-sign-out" class="secondary">Sign out</button>
+  </section>
+
+  <section id="change-password" hidden>
+    <h1>Change password</h1>
+    <p>Choose a new password for <strong id="password-email"></strong>. Use at least 12 characters; a password manager can generate one.</p>
+    <form id="password-form">
+      <label for="new-password">New password</label>
+      <input id="new-password" type="password" autocomplete="new-password" minlength="12" required>
+      <label for="confirm-password">Repeat new password</label>
+      <input id="confirm-password" type="password" autocomplete="new-password" minlength="12" required>
+      <p class="hint">Claude stays connected. Use the new password the next time you sign in.</p>
+      <button type="submit" id="save-password">Save new password</button>
+      <button type="button" id="cancel-password" class="secondary">Cancel</button>
+    </form>
   </section>
 
   <section id="failure" hidden>
@@ -85,7 +113,8 @@
     <p id="failure-text"></p>
   </section>
 
-  <p id="error" class="error" hidden></p>
+  <p id="error" class="error" role="alert" hidden></p>
+  <p id="success" class="success" role="status" hidden></p>
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -94,25 +123,42 @@
   const SUPABASE_URL = "https://dtbajaimofzixiaksebf.supabase.co";
   const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_eN_cvhzIm-TP0G2Dn49YaA_XW03Bl50";
 
+  const MIN_PASSWORD_LENGTH = 12;
+
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
   const authorizationId = new URLSearchParams(location.search).get("authorization_id");
   const $ = (id) => document.getElementById(id);
+  const SECTIONS = ["loading", "login", "consent", "account", "change-password", "failure"];
+
+  // Two modes. Opened by Supabase Auth with an authorization_id, the page asks
+  // the signed-in user to allow or deny the OAuth client. Opened directly, it
+  // lets the user sign in and change their password. homeSection is where the
+  // password form returns to.
+  let homeSection = "account";
 
   function show(id) {
-    for (const section of ["loading", "login", "consent", "failure"]) $(section).hidden = section !== id;
+    for (const section of SECTIONS) $(section).hidden = section !== id;
   }
-  function showError(message) {
-    $("error").textContent = message;
-    $("error").hidden = !message;
+  function showMessage(id, message) {
+    $(id).textContent = message;
+    $(id).hidden = !message;
+  }
+  function clearMessages() {
+    showMessage("error", "");
+    showMessage("success", "");
   }
   function fatal(message) {
     $("failure-text").textContent = message;
     show("failure");
   }
 
-  // Loads the pending authorization request. Supabase answers either with the
-  // request details (consent needed) or straight away with a redirect_url
-  // (the user already approved this client before).
+  async function currentEmail() {
+    const { data } = await sb.auth.getUser();
+    return data.user?.email || "";
+  }
+
+  // Supabase answers either with the request details (consent needed) or
+  // straight away with a redirect_url (this client was approved before).
   async function loadRequest() {
     show("loading");
     const { data, error } = await sb.auth.oauth.getAuthorizationDetails(authorizationId);
@@ -122,10 +168,31 @@
     $("client-name").textContent = data.client?.name || "An application";
     $("user-email").textContent = data.user?.email || "";
     $("redirect-uri").textContent = data.redirect_uri || "";
+    homeSection = "consent";
     show("consent");
   }
 
+  async function showAccount() {
+    $("account-email").textContent = await currentEmail();
+    homeSection = "account";
+    show("account");
+  }
+
+  async function afterSignIn() {
+    if (authorizationId) await loadRequest();
+    else await showAccount();
+  }
+
+  async function openPasswordForm() {
+    clearMessages();
+    $("password-form").reset();
+    $("password-email").textContent = await currentEmail();
+    show("change-password");
+    $("new-password").focus();
+  }
+
   async function decide(approve) {
+    clearMessages();
     $("approve").disabled = $("deny").disabled = true;
     const options = { skipBrowserRedirect: true };
     const { data, error } = approve
@@ -133,34 +200,67 @@
       : await sb.auth.oauth.denyAuthorization(authorizationId, options);
     if (error) {
       $("approve").disabled = $("deny").disabled = false;
-      return showError(error.message);
+      return showMessage("error", error.message);
     }
     location.replace(data.redirect_url);
   }
 
+  async function signOut() {
+    await sb.auth.signOut();
+    clearMessages();
+    $("login-form").reset();
+    show("login");
+  }
+
   $("login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    showError("");
+    clearMessages();
     const { error } = await sb.auth.signInWithPassword({
       email: $("email").value.trim(),
       password: $("password").value,
     });
-    if (error) return showError(error.message);
-    await loadRequest();
+    if (error) return showMessage("error", error.message);
+    await afterSignIn();
+  });
+
+  $("password-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    clearMessages();
+    const password = $("new-password").value;
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return showMessage("error", `The password needs at least ${MIN_PASSWORD_LENGTH} characters.`);
+    }
+    if (password !== $("confirm-password").value) {
+      return showMessage("error", "The two passwords don't match.");
+    }
+    $("save-password").disabled = true;
+    const { error } = await sb.auth.updateUser({ password });
+    $("save-password").disabled = false;
+    if (error) {
+      // With "secure password change" on, Supabase refuses the change when the sign-in is too old.
+      const stale = /reauthenticat|recent/i.test(error.message || "");
+      return showMessage("error", stale ? "For security, sign out and sign in again, then change the password." : error.message);
+    }
+    $("password-form").reset();
+    show(homeSection);
+    showMessage("success", "Password changed.");
   });
 
   $("approve").addEventListener("click", () => decide(true));
   $("deny").addEventListener("click", () => decide(false));
-  $("switch").addEventListener("click", async () => {
-    await sb.auth.signOut();
-    showError("");
-    show("login");
+  $("switch").addEventListener("click", signOut);
+  $("account-sign-out").addEventListener("click", signOut);
+  $("consent-change-password").addEventListener("click", openPasswordForm);
+  $("account-change-password").addEventListener("click", openPasswordForm);
+  $("cancel-password").addEventListener("click", () => {
+    clearMessages();
+    show(homeSection);
   });
 
   (async () => {
-    if (!authorizationId) return fatal("This page is opened by Claude when connecting the Netvisor sync. Start the connection from Claude's connector settings.");
+    if (!authorizationId) $("login-text").textContent = "Sign in to manage your Netvisor sync account.";
     const { data } = await sb.auth.getSession();
-    if (data.session) await loadRequest();
+    if (data.session) await afterSignIn();
     else show("login");
   })();
 </script>
