@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>Netvisor sync – sign in</title>
+  <title>Tietokanta Sync – sign in</title>
   <style>
     :root {
       --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5b6475;
@@ -57,7 +57,7 @@
 
   <section id="login" hidden>
     <h1>Sign in</h1>
-    <p id="login-text">Sign in to connect Claude to the Netvisor sync.</p>
+    <p id="login-text">Sign in to connect Claude to Tietokanta Sync.</p>
     <form id="login-form">
       <label for="email">Email</label>
       <input id="email" type="email" autocomplete="username" required>
@@ -69,7 +69,7 @@
 
   <section id="consent" hidden>
     <h1>Allow access?</h1>
-    <p><strong id="client-name"></strong> wants to use the Netvisor sync tools as you.</p>
+    <p><strong id="client-name"></strong> wants to use the Tietokanta Sync tools as you.</p>
     <dl>
       <dt>Signed in as</dt><dd id="user-email"></dd>
       <dt>Returns to</dt><dd id="redirect-uri"></dd>
@@ -120,8 +120,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
   // Project URL and publishable (anon) key. Both are public values.
-  const SUPABASE_URL = "https://dtbajaimofzixiaksebf.supabase.co";
-  const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_eN_cvhzIm-TP0G2Dn49YaA_XW03Bl50";
+  const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+  const SUPABASE_PUBLISHABLE_KEY = "YOUR-PUBLISHABLE-OR-ANON-KEY";
 
   const MIN_PASSWORD_LENGTH = 12;
 
@@ -258,7 +258,7 @@
   });
 
   (async () => {
-    if (!authorizationId) $("login-text").textContent = "Sign in to manage your Netvisor sync account.";
+    if (!authorizationId) $("login-text").textContent = "Sign in to manage your Tietokanta Sync account.";
     const { data } = await sb.auth.getSession();
     if (data.session) await afterSignIn();
     else show("login");
