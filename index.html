@@ -125,7 +125,18 @@
 
   const MIN_PASSWORD_LENGTH = 12;
 
-  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+  // The session is kept in sessionStorage, which the browser clears when the
+  // tab or window is closed, so every visit in a new tab starts signed out.
+  // Sessions saved permanently in localStorage are removed on load.
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("sb-") && key.includes("-auth-token")) localStorage.removeItem(key);
+    }
+  } catch { /* storage unavailable */ }
+
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: { storage: window.sessionStorage, persistSession: true },
+  });
   const authorizationId = new URLSearchParams(location.search).get("authorization_id");
   const $ = (id) => document.getElementById(id);
   const SECTIONS = ["loading", "login", "consent", "account", "change-password", "failure"];
@@ -206,7 +217,8 @@
   }
 
   async function signOut() {
-    await sb.auth.signOut();
+    // Ends only this browser session; sessions issued to OAuth clients stay valid.
+    await sb.auth.signOut({ scope: "local" });
     clearMessages();
     $("login-form").reset();
     show("login");
